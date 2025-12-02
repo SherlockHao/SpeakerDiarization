@@ -7,6 +7,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import emb_extractor
+import speaker_clustering
 from scipy.spatial.distance import cdist
 
 def main():
@@ -34,30 +35,50 @@ def main():
         distance = cdist(embedding1_2d, embedding2_2d, metric='cosine')[0,0]
         
         print(f"两个音频之间的余弦距离: {distance}")
+        
+        # 4. 聚类测试
+        print("进行聚类测试...")
+        clustering_model = speaker_clustering.initialize_clustering()
+        embeddings = [embedding1, embedding2]  # 将嵌入向量放入列表
+        cluster_labels = clustering_model.cluster_embeddings(embeddings)
+        print(f"聚类标签: {cluster_labels}")
+        unique_speakers = len(set(cluster_labels))
+        print(f"检测到的说话人数量: {unique_speakers}")
+        
         print("在线模式处理完成！\n")
     except Exception as e:
         print(f"在线模式失败: {e}\n")
 
     print("=== 离线模式示例 ===")
-    # 4. 离线模式初始化提取器（不需要网络连接）
+    # 5. 离线模式初始化提取器（不需要网络连接）
     try:
         offline_extractor = emb_extractor.initialize_extractor(offline_mode=True)
         
         print("离线提取器初始化成功！")
         
-        # 5. 提取音频嵌入向量
+        # 6. 提取音频嵌入向量
         embedding1_offline = offline_extractor.extract_embedding('./data/emb_yiya.wav')
         embedding2_offline = offline_extractor.extract_embedding('./data/out_yiya_en.wav')
         
         print(f"离线模式 - 音频1嵌入向量形状: {embedding1_offline.shape}")
         print(f"离线模式 - 音频2嵌入向量形状: {embedding2_offline.shape}")
         
-        # 6. 计算两个音频的相似度
+        # 7. 计算两个音频的相似度
         embedding1_2d_off = embedding1_offline.reshape(1, -1)
         embedding2_2d_off = embedding2_offline.reshape(1, -1)
         distance_off = cdist(embedding1_2d_off, embedding2_2d_off, metric='cosine')[0,0]
         
         print(f"离线模式 - 两个音频之间的余弦距离: {distance_off}")
+        
+        # 8. 聚类测试
+        print("进行聚类测试...")
+        clustering_model = speaker_clustering.initialize_clustering()
+        embeddings = [embedding1_offline, embedding2_offline]  # 将嵌入向量放入列表
+        cluster_labels = clustering_model.cluster_embeddings(embeddings)
+        print(f"聚类标签: {cluster_labels}")
+        unique_speakers = len(set(cluster_labels))
+        print(f"检测到的说话人数量: {unique_speakers}")
+        
         print("离线模式处理完成！")
     except Exception as e:
         print(f"离线模式失败: {e}")
