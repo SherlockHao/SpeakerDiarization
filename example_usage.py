@@ -34,9 +34,9 @@ def main():
         distance = cdist(embedding1_2d, embedding2_2d, metric='cosine')[0,0]
         
         print(f"两个音频之间的余弦距离: {distance}")
-        print("在线模式处理完成！")
+        print("在线模式处理完成！\n")
     except Exception as e:
-        print(f"在线模式失败: {e}")
+        print(f"在线模式失败: {e}\n")
 
     print("=== 离线模式示例 ===")
     # 4. 离线模式初始化提取器（不需要网络连接）
