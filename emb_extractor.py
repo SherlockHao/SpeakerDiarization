@@ -3,11 +3,22 @@ emb_extractor - 语音嵌入提取库
 
 此库提供了一个用于提取音频嵌入向量的接口，使用pyannote/wespeaker-voxceleb-resnet34-LM模型。
 """
+# 禁用torchcodec以使用soundfile作为音频后端
+import sys
+import os
+
+# 创建一个虚拟的torchcodec模块以阻止其加载，强制使用soundfile
+class _DummyModule:
+    def __getattr__(self, name):
+        raise ImportError("torchcodec is intentionally disabled")
+
+sys.modules['torchcodec'] = _DummyModule()
+sys.modules['torchcodec.decoders'] = _DummyModule()
+
 from huggingface_hub import login, snapshot_download
 from pyannote.audio import Inference, Model
 import torch
 import numpy as np
-import os
 
 class EmbeddingExtractor:
     """
@@ -15,26 +26,37 @@ class EmbeddingExtractor:
     使用pyannote/wespeaker-voxceleb-resnet34-LM模型提取音频嵌入向量
     """
     
-    def __init__(self, api_key=None, offline_mode=False):
+    def __init__(self, api_key=None, offline_mode=False, cache_dir=None):
         """
         初始化嵌入提取器
-        
+
         Args:
             api_key (str, optional): Hugging Face API密钥，如果未提供则尝试从环境变量获取
             offline_mode (bool, optional): 是否使用离线模式（从本地加载模型），默认为False
-            
+            cache_dir (str, optional): 模型缓存目录，如果未提供则使用项目根目录下的models文件夹
+
         Raises:
             ValueError: 当API密钥未提供且不在离线模式时抛出
         """
         self.offline_mode = offline_mode
-        
+
+        # 设置缓存目录
+        if cache_dir is None:
+            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            cache_dir = os.path.join(script_dir, "models")
+        self.cache_dir = cache_dir
+
+        # 创建缓存目录（如果不存在）
+        os.makedirs(self.cache_dir, exist_ok=True)
+
         # 如果不是离线模式，需要API密钥
         if not offline_mode:
             if api_key is None:
-                api_key = os.getenv("HF_API_KEY")
+                # 首先尝试HF_TOKEN，然后尝试HF_API_KEY（向后兼容）
+                api_key = os.getenv("HF_TOKEN") or os.getenv("HF_API_KEY")
                 if api_key is None:
-                    raise ValueError("API密钥未提供，且环境变量HF_API_KEY未设置")
-            
+                    raise ValueError("API密钥未提供，且环境变量HF_TOKEN或HF_API_KEY未设置")
+
             # 使用APIKEY进行Hugging Face认证
             login(token=api_key)
 
@@ -74,10 +96,11 @@ class EmbeddingExtractor:
                 local_files_only=True  # 只使用本地文件
             )
         else:
-            # 在线模式：从Hugging Face Hub加载模型
+            # 在线模式：从Hugging Face Hub加载模型，并指定缓存目录
             self.embedding_model = Model.from_pretrained(
                 "pyannote/wespeaker-voxceleb-resnet34-LM",
-                use_auth_token=api_key
+                use_auth_token=api_key,
+                cache_dir=self.cache_dir
             )
         
         self.embedding_model.to(device)
@@ -89,19 +112,27 @@ class EmbeddingExtractor:
     def _get_local_model_path(self):
         """
         获取本地模型路径
-        
+
         Returns:
             str: 本地模型路径
         """
-        # 检查默认的Hugging Face缓存路径
-        cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-        model_dir = os.path.join(cache_dir, "models--pyannote--wespeaker-voxceleb-resnet34-LM")
-        
+        # 首先检查自定义模型路径（绝对路径）
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        custom_model_dir = os.path.join(script_dir, "models", "models--pyannote--wespeaker-voxceleb-resnet34-LM")
+
+        # 检查自定义路径是否存在
+        if os.path.exists(custom_model_dir):
+            model_dir = custom_model_dir
+        else:
+            # 如果自定义路径不存在，回退到默认的Hugging Face缓存路径
+            cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+            model_dir = os.path.join(cache_dir, "models--pyannote--wespeaker-voxceleb-resnet34-LM")
+
         if os.path.exists(model_dir):
             # 找到最新的快照目录
             snapshots_dir = os.path.join(model_dir, "snapshots")
             if os.path.exists(snapshots_dir):
-                snapshot_dirs = [d for d in os.listdir(snapshots_dir) if 
+                snapshot_dirs = [d for d in os.listdir(snapshots_dir) if
                                 os.path.isdir(os.path.join(snapshots_dir, d))]
                 if snapshot_dirs:
                     # 通常使用main引用的目录
@@ -112,49 +143,60 @@ class EmbeddingExtractor:
                         snapshot_path = os.path.join(snapshots_dir, commit_hash)
                         if os.path.exists(snapshot_path):
                             return snapshot_path
-                    
+
                     # 如果main引用不可用，使用最新的目录
-                    latest_snapshot = sorted(snapshot_dirs, 
+                    latest_snapshot = sorted(snapshot_dirs,
                                            key=lambda x: os.path.getmtime(os.path.join(snapshots_dir, x)),
                                            reverse=True)[0]
                     return os.path.join(snapshots_dir, latest_snapshot)
-        
+
         raise FileNotFoundError(f"未找到本地模型文件，请确保模型已下载到: {model_dir}")
 
     def extract_embedding(self, wav_path):
         """
         从音频文件路径提取嵌入向量
-        
+
         Args:
             wav_path (str): 音频文件路径
-            
+
         Returns:
             numpy.ndarray: 音频的嵌入向量，形状为(256,)
-            
+
         Raises:
             FileNotFoundError: 当音频文件不存在时抛出
         """
         if not os.path.exists(wav_path):
             raise FileNotFoundError(f"音频文件不存在: {wav_path}")
-        
-        embedding = self.embedding_inference(wav_path)
-        
+
+        # 使用torchaudio加载音频，然后以字典格式传递（绕过torchcodec）
+        import torchaudio
+        waveform, sample_rate = torchaudio.load(wav_path)
+
+        # 创建字典格式的音频输入
+        audio_dict = {
+            "waveform": waveform,
+            "sample_rate": sample_rate
+        }
+
+        embedding = self.embedding_inference(audio_dict)
+
         # 确保输出是一维数组
         if len(embedding.shape) > 1:
             embedding = embedding.reshape(-1)
-            
+
         return embedding
 
-def initialize_extractor(api_key=None, offline_mode=False):
+def initialize_extractor(api_key=None, offline_mode=False, cache_dir=None):
     """
     初始化嵌入提取器的便捷函数
-    
+
     Args:
         api_key (str, optional): Hugging Face API密钥
         offline_mode (bool, optional): 是否使用离线模式（从本地加载模型），默认为False
-        
+        cache_dir (str, optional): 模型缓存目录，如果未提供则使用项目根目录下的models文件夹
+
     Returns:
         EmbeddingExtractor: 初始化的嵌入提取器实例
     """
-    return EmbeddingExtractor(api_key, offline_mode)
+    return EmbeddingExtractor(api_key, offline_mode, cache_dir)
 
