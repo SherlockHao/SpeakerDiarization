@@ -3,17 +3,9 @@ emb_extractor - 语音嵌入提取库
 
 此库提供了一个用于提取音频嵌入向量的接口，使用pyannote/wespeaker-voxceleb-resnet34-LM模型。
 """
-# 禁用torchcodec以使用soundfile作为音频后端
+# 使用torchaudio作为音频后端（torchcodec已被卸载）
 import sys
 import os
-
-# 创建一个虚拟的torchcodec模块以阻止其加载，强制使用soundfile
-class _DummyModule:
-    def __getattr__(self, name):
-        raise ImportError("torchcodec is intentionally disabled")
-
-sys.modules['torchcodec'] = _DummyModule()
-sys.modules['torchcodec.decoders'] = _DummyModule()
 
 from huggingface_hub import login, snapshot_download
 from pyannote.audio import Inference, Model
