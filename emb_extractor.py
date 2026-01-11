@@ -7,6 +7,10 @@ emb_extractor - 语音嵌入提取库
 import sys
 import os
 
+# 设置环境变量强制使用 soundfile 作为音频后端
+os.environ['PYANNOTE_AUDIO_BACKEND'] = 'soundfile'
+os.environ['TORCHAUDIO_BACKEND'] = 'soundfile'
+
 from huggingface_hub import login, snapshot_download
 from pyannote.audio import Inference, Model
 import torch
@@ -160,9 +164,19 @@ class EmbeddingExtractor:
         if not os.path.exists(wav_path):
             raise FileNotFoundError(f"音频文件不存在: {wav_path}")
 
-        # 使用torchaudio加载音频，然后以字典格式传递（绕过torchcodec）
-        import torchaudio
-        waveform, sample_rate = torchaudio.load(wav_path)
+        # 使用 soundfile 加载音频（避免 torchcodec）
+        import soundfile as sf
+
+        # 读取音频文件
+        waveform_np, sample_rate = sf.read(wav_path)
+
+        # 转换为 torch tensor 并确保是 2D (channels, samples)
+        if len(waveform_np.shape) == 1:
+            # 单声道，添加 channel 维度
+            waveform = torch.from_numpy(waveform_np).unsqueeze(0).float()
+        else:
+            # 多声道，转置为 (channels, samples)
+            waveform = torch.from_numpy(waveform_np.T).float()
 
         # 创建字典格式的音频输入
         audio_dict = {
